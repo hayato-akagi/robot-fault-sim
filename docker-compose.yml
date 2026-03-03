@@ -1,0 +1,73 @@
+services:
+
+  # ------------------------------------------------------------------
+  # 本番生成: 各カテゴリ50件 + GIF1件
+  # ------------------------------------------------------------------
+  sim:
+    build: .
+    volumes:
+      - ./output:/app/output          # 生成物をホストにマウント
+      - ./config:/app/config:ro
+      - ./specs:/app/specs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "scripts/run_dataset.py", "--gif"]
+
+  # ------------------------------------------------------------------
+  # 疎通確認: 各カテゴリ5件のみ（約2分）
+  # ------------------------------------------------------------------
+  sim-quick:
+    build: .
+    volumes:
+      - ./output:/app/output
+      - ./config:/app/config:ro
+      - ./specs:/app/specs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "scripts/run_dataset.py", "--quick", "--gif"]
+    profiles: ["quick"]
+
+  # ------------------------------------------------------------------
+  # experiment-classifier へのエクスポートのみ実行
+  # ------------------------------------------------------------------
+  export:
+    build: .
+    volumes:
+      - ./output:/app/output:ro
+      - ../experiment-classifier/data:/classifier-data
+    environment:
+      - PYTHONUNBUFFERED=1
+    command:
+      - bash
+      - -c
+      - |
+        cp -v /app/output/dataset/logs/*.txt   /classifier-data/logs/
+        cp -v /app/output/dataset/docs/*.txt   /classifier-data/docs/
+        cp -v /app/output/dataset/labels.csv   /classifier-data/labels/
+        echo "Export complete."
+    profiles: ["export"]
+
+  # ------------------------------------------------------------------
+  # デバッグ: 1エピソードのみ実行して状態を詳細出力
+  # ------------------------------------------------------------------
+  debug:
+    build: .
+    volumes:
+      - ./output:/app/output
+      - ./config:/app/config:ro
+      - ./specs:/app/specs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "scripts/debug_episode.py", "normal"]
+    profiles: ["debug"]
+
+  debug-mechanical:
+    build: .
+    volumes:
+      - ./output:/app/output
+      - ./config:/app/config:ro
+      - ./specs:/app/specs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "scripts/debug_episode.py", "mechanical"]
+    profiles: ["debug"]

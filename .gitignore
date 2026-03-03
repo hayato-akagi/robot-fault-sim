@@ -1,0 +1,31 @@
+# 生成データ
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# モデル・大容量ファイル
+*.gguf
+*.pt
+*.pth
+*.bin
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# 一時ファイル
+*.log
+*.tmp

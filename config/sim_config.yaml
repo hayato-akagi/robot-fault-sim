@@ -1,0 +1,55 @@
+simulation:
+  time_step: 0.00416       # 1/240 秒
+  max_steps_per_episode: 600
+  gravity: -9.8
+
+categories:
+  - mechanical
+  - electrical
+  - software
+  - normal
+
+dataset:
+  normal: 50
+  mechanical: 50
+  electrical: 50
+  software: 50
+
+robot_spec:
+  max_torque_nm: 8.0
+  max_velocity_rad_s: 1.5
+  grip_force_n: 10.0
+  control_period_ms: 10.0
+  sensor_timeout_ms: 50.0
+  ik_residual_threshold: 0.01
+
+fault_params:
+  mechanical:
+    friction_multiplier: 6.0
+    torque_threshold_ratio: 1.1
+    grip_scale: 0.35
+  electrical:
+    sensor_noise_std: 0.08
+    voltage_scale: 0.55
+    timeout_steps: 30
+  software:
+    loop_delay_ms: 28.0
+    phase_timeout_steps: 30    # 短くして timeout を発生させやすくする
+    ik_diverge_offset: 0.3
+
+visualization:
+  gif_fps: 20
+  width: 640
+  height: 480
+  # ロボットアームを正面から見るカメラ設定
+  camera_distance: 1.2
+  camera_yaw: 50
+  camera_pitch: -25
+  camera_target: [0.4, 0.0, 0.75]   # ロボット作業空間の中心
+
+output:
+  dataset_dir: output/dataset
+  viz_dir: output/viz
+  logs_dir: output/dataset/logs
+  labels_file: output/dataset/labels.csv
+  docs_dir: output/dataset/docs
