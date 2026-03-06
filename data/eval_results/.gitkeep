@@ -1,0 +1,7 @@
+# eval_results/ — バッチ実行の評価結果を格納
+# 構造例:
+# eval_results/
+#   <run_id>/
+#     summary.json         — ベースライン比較結果
+#     B1_predictions.json  — 個別予測
+#     n_curve.json         — N-accuracy curve（オプション）

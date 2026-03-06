@@ -1,0 +1,6 @@
+# experiments/ — 実験設定と分類結果を格納
+# 構造例:
+# experiments/
+#   <experiment_id>/
+#     config.json          — 実験設定（ラベル・テンプレート・N など）
+#     class_results.json   — バッチ分類結果
