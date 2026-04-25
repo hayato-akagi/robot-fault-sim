@@ -20,14 +20,13 @@ class LogGenerator:
 
         for ev in events:
             offset_ms = ev.t * 4  # 240Hz → ms換算
-            lines.append(self._fmt(offset_ms, ev.level, ev.message))
+            lines.append(self._fmt(offset_ms, ev.level, f"code={ev.code} {ev.message}"))
 
-            # ERROR は診断詳細行を追加（LLMが拾いやすいように）
-            if ev.level == "ERROR":
-                lines.append(self._fmt(offset_ms, "ERROR",
-                    f"FAULT DETECTED: {ev.event_type} "
-                    f"category={ev.category} phase={ev.phase} "
-                    f"values={ev.values}"
+            # WARN/ERROR は診断詳細行を追加
+            if ev.level in ("WARN", "ERROR"):
+                lines.append(self._fmt(offset_ms, ev.level,
+                    f"DIAG code={ev.code} type={ev.event_type} "
+                    f"phase={ev.phase} values={ev.values}"
                 ))
 
         n_errors = sum(1 for e in events if e.level == "ERROR")

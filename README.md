@@ -27,6 +27,96 @@ docker compose up --build
 | `output/viz/*.gif` | 可視化 GIF |
 | `output/viz/sensor_overview.png` | センサグラフ |
 
+### システムブロック図（ログ出力・保存経路）
+
+```mermaid
+flowchart TD
+  A[run_dataset.py] --> B[pipeline.py]
+  B --> C[kuka_sim.py / controller.py]
+  C --> D[sensor.py]
+  D --> E[log_generator.py]
+  D --> F[label_writer.py]
+  C --> G[gif_renderer.py / plot_renderer.py]
+
+  E --> H[output/dataset/logs/log_XXXX.txt]
+  F --> I[output/dataset/labels.csv]
+  B --> J[output/dataset/docs/robot_arm_spec.txt]
+  G --> K[output/viz/*.gif]
+  G --> L[output/viz/sensor_overview.png]
+
+  H --> M[build_dataset_json.py]
+  I --> M
+  M --> N[data/sample_dataset.json]
+
+  N --> O[build_compact_dataset_json.py]
+  O --> P[data/sample_dataset_compact.json]
+
+  N --> Q[export_to_classifier.sh]
+  R[data/knowledge/*.md] --> Q
+  Q --> S[experiment-classifier data/]
+```
+
+### システムブロック図（構成要素ベース）
+
+```mermaid
+flowchart LR
+  subgraph ControllerSystem[制御系]
+    C[コントローラ]
+    P[シミュレーション設定]
+    FI[故障注入モジュール]
+  end
+
+  subgraph RobotSystem[ロボット系]
+    A[ロボットアーム]
+    G[グリッパー]
+    S[センサ群]
+  end
+
+  subgraph Workspace[作業空間]
+    B1[対象の箱 Pick Box]
+    B2[搬送先の箱 Place Box]
+    T[机 Table]
+  end
+
+  subgraph Logging[ログ出力・保存]
+    LG[ログ生成]
+    LW[ラベル生成]
+    L1[output/dataset/logs/log_XXXX.txt]
+    L2[output/dataset/labels.csv]
+  end
+
+  C -->|関節指令 / 把持指令| A
+  A --> G
+  G -->|把持 / 解放| B1
+  A -->|移動| B1
+  A -->|移動| B2
+
+  B1 -->|接触反力| G
+  T -->|支持| B1
+  T -->|支持| B2
+  T -->|設置| A
+
+  A -->|状態量| S
+  G -->|把持力| S
+  S -->|観測値| C
+
+  P --> C
+
+  P --> FI
+  FI -->|mechanical: 摩擦増加 / 把持低下| A
+  FI -->|electrical: ノイズ / 通信異常| S
+  FI -->|software: ループ遅延 / IK発散| C
+
+  C -->|フェーズ遷移・制御状態| LG
+  S -->|観測値・異常検知| LG
+  FI -->|注入イベント| LG
+  LG --> L1
+
+  FI -->|故障種別| LW
+  C -->|エピソード結果| LW
+  LW --> L2
+```
+
 ### Step 2: JSON データセットへ変換
 
 ```bash

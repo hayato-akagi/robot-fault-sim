@@ -1,5 +1,6 @@
 # 生成データ
 output/
+data/sample_dataset.json
 
 # Python
 __pycache__/

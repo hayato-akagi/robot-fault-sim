@@ -20,6 +20,68 @@ ENCODER_TOL_RAD    = 0.05
 GRIP_FORCE_WARN    = 60.0   # 正常=100N
 GRIP_FORCE_ERR     = 5.0    # 2Nをキャッチ
 
+# 現場ログ風の診断コード定義（ラベル名を直接含めない）
+EVENT_DEFINITIONS = {
+    # Mechanical-like
+    "joint_torque_overload": {
+        "level": "ERROR",
+        "code": "ALM-JNT-OVR",
+        "summary": "Joint torque exceeded alarm limit.",
+    },
+    "grip_force_degraded": {
+        "level": "WARN",
+        "code": "WRN-GRP-LOW",
+        "summary": "Grip force dropped below nominal hold range.",
+    },
+    "grip_lost_during_transport": {
+        "level": "ERROR",
+        "code": "ALM-GRP-SLP",
+        "summary": "Object holding became unstable during transfer.",
+    },
+    "axis_stiction_suspected": {
+        "level": "WARN",
+        "code": "WRN-AXS-STK",
+        "summary": "Axis motion appears constrained under high load.",
+    },
+    # Electrical-like
+    "sensor_packet_timeout": {
+        "level": "ERROR",
+        "code": "ALM-COM-TO",
+        "summary": "Joint state packet timeout detected.",
+    },
+    "encoder_deviation": {
+        "level": "WARN",
+        "code": "WRN-ENC-DEV",
+        "summary": "Encoder signal deviation exceeded tolerance.",
+    },
+    # Software-like
+    "control_loop_overrun": {
+        "level": "WARN",
+        "code": "WRN-CTL-OVR",
+        "summary": "Control loop period exceeded real-time budget.",
+    },
+    "ik_divergence": {
+        "level": "ERROR",
+        "code": "ALM-IK-DIV",
+        "summary": "Inverse-kinematics residual diverged.",
+    },
+    "ik_position_error": {
+        "level": "WARN",
+        "code": "WRN-IK-RES",
+        "summary": "Inverse-kinematics residual above warning threshold.",
+    },
+    # Periodic
+    "periodic_status": {
+        "level": "INFO",
+        "code": "INF-STAT-20",
+        "summary": "Periodic status snapshot.",
+    },
+}
+
+
+def event_code(event_type: str) -> str:
+    return EVENT_DEFINITIONS.get(event_type, {}).get("code", "INF-UNDEF")
+
 
 @dataclass
 class SensorEvent:
@@ -28,6 +90,7 @@ class SensorEvent:
     level: str          # INFO / WARN / ERROR
     category: str       # mechanical / electrical / software / normal
     event_type: str
+    code: str
     message: str
     values: dict
 
@@ -56,16 +119,61 @@ class SensorMonitor:
         evs = []
         force = r.grip_force_actual
 
+        # 関節トルク超過（J1-J4: 8.8Nm, J5-J7: 6.6Nm）
+        for i, tq in enumerate(r.joint_torques):
+            limit = 8.8 if i < 4 else 6.6
+            if abs(tq) > limit:
+                evs.append(SensorEvent(
+                    t=r.t, phase=r.phase, level="ERROR",
+                    category="mechanical",
+                    event_type="joint_torque_overload",
+                    code=event_code("joint_torque_overload"),
+                    message=(
+                        f"Joint load exceeded limit at axis=J{i+1}: "
+                        f"torque={abs(tq):.2f}Nm > limit={limit:.2f}Nm "
+                        f"during phase={r.phase}."
+                    ),
+                    values={
+                        "axis": f"J{i+1}",
+                        "torque_nm": round(abs(tq), 3),
+                        "limit_nm": limit,
+                        "phase": r.phase,
+                    },
+                ))
+
+        # 固着兆候: 速度ほぼゼロ + トルク高負荷
+        max_vel = max(abs(v) for v in r.joint_velocities) if r.joint_velocities else 0.0
+        max_tq = max(abs(v) for v in r.joint_torques) if r.joint_torques else 0.0
+        if r.phase in ("GRASP", "LIFT", "MOVE", "HOLD") and max_vel < 0.02 and max_tq > 5.5:
+            axis_idx = int(np.argmax(np.abs(r.joint_torques))) if r.joint_torques else 0
+            evs.append(SensorEvent(
+                t=r.t, phase=r.phase, level="WARN",
+                category="mechanical",
+                event_type="axis_stiction_suspected",
+                code=event_code("axis_stiction_suspected"),
+                message=(
+                    f"Axis response lag under load: axis=J{axis_idx+1} "
+                    f"peak_torque={max_tq:.2f}Nm with near-zero velocity "
+                    f"({max_vel:.3f}rad/s)."
+                ),
+                values={
+                    "axis": f"J{axis_idx+1}",
+                    "peak_torque_nm": round(max_tq, 3),
+                    "max_velocity_rad_s": round(max_vel, 4),
+                },
+            ))
+
         if r.phase == "GRASP" and r.gripper_val == 1:
             if force < GRIP_FORCE_ERR:
                 evs.append(SensorEvent(
                     t=r.t, phase=r.phase, level="ERROR",
                     category="mechanical",
                     event_type="grip_force_insufficient",
+                    code=event_code("grip_lost_during_transport"),
                     message=(
-                        f"Gripper force critical at t={r.t} phase={r.phase}: "
-                        f"actual={force:.1f}N < threshold={GRIP_FORCE_ERR:.0f}N. "
-                        f"Object grasp failed. Possible actuator degradation."
+                        f"Holding force below minimum requirement: "
+                        f"actual={force:.1f}N, required>={GRIP_FORCE_ERR:.1f}N "
+                        f"at phase={r.phase}."
                     ),
                     values={"grip_force_actual": round(force, 2),
                             "threshold": GRIP_FORCE_ERR,
@@ -76,10 +184,10 @@ class SensorMonitor:
                     t=r.t, phase=r.phase, level="WARN",
                     category="mechanical",
                     event_type="grip_force_degraded",
+                    code=event_code("grip_force_degraded"),
                     message=(
-                        f"Gripper force degraded at t={r.t} phase={r.phase}: "
-                        f"actual={force:.1f}N < nominal={GRIP_FORCE_WARN:.0f}N. "
-                        f"Grasp reliability reduced."
+                        f"Grip margin reduced: actual={force:.1f}N, "
+                        f"nominal>={GRIP_FORCE_WARN:.0f}N at phase={r.phase}."
                     ),
                     values={"grip_force_actual": round(force, 2),
                             "nominal": GRIP_FORCE_WARN},
@@ -92,9 +200,10 @@ class SensorMonitor:
                     t=r.t, phase=r.phase, level="ERROR",
                     category="mechanical",
                     event_type="grip_lost_during_transport",
+                    code=event_code("grip_lost_during_transport"),
                     message=(
-                        f"Grip lost during transport at t={r.t} phase={r.phase}: "
-                        f"force={force:.1f}N. Object drop likely."
+                        f"Object retention unstable during transfer: "
+                        f"grip_force={force:.1f}N at phase={r.phase}."
                     ),
                     values={"grip_force_actual": round(force, 2),
                             "phase": r.phase},
@@ -110,6 +219,7 @@ class SensorMonitor:
                 t=r.t, phase=r.phase, level="ERROR",
                 category="electrical",
                 event_type="sensor_packet_timeout",
+                code=event_code("sensor_packet_timeout"),
                 message=(
                     f"Sensor communication blackout at t={r.t} phase={r.phase}. "
                     f"No joint state packet within "
@@ -126,6 +236,7 @@ class SensorMonitor:
                 t=r.t, phase=r.phase, level="WARN",
                 category="electrical",
                 event_type="encoder_deviation",
+                code=event_code("encoder_deviation"),
                 message=(
                     f"Encoder signal anomaly at t={r.t} phase={r.phase}: "
                     f"noise_rms={r.encoder_noise_rms:.4f}rad "
@@ -147,6 +258,7 @@ class SensorMonitor:
                 t=r.t, phase=r.phase, level="WARN",
                 category="software",
                 event_type="control_loop_overrun",
+                code=event_code("control_loop_overrun"),
                 message=(
                     f"Control loop overrun at t={r.t} phase={r.phase}: "
                     f"period={r.loop_period_ms:.1f}ms "
@@ -163,6 +275,7 @@ class SensorMonitor:
                 t=r.t, phase=r.phase, level="ERROR",
                 category="software",
                 event_type="ik_divergence",
+                code=event_code("ik_divergence"),
                 message=(
                     f"IK divergence at t={r.t} phase={r.phase}: "
                     f"residual={r.ik_residual:.4f}m "
@@ -177,6 +290,7 @@ class SensorMonitor:
                 t=r.t, phase=r.phase, level="WARN",
                 category="software",
                 event_type="ik_position_error",
+                code=event_code("ik_position_error"),
                 message=(
                     f"IK position error at t={r.t} phase={r.phase}: "
                     f"residual={r.ik_residual:.4f}m "
@@ -202,6 +316,7 @@ class SensorMonitor:
             t=r.t, phase=r.phase, level="INFO",
             category="normal",
             event_type="periodic_status",
+            code=event_code("periodic_status"),
             message=(
                 f"t={r.t} phase={r.phase} "
                 f"ee={pos_str} "
