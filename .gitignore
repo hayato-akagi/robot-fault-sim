@@ -1,6 +1,7 @@
 # 生成データ
 output/
 data/sample_dataset.json
+data/extracted_errors.json
 
 # Python
 __pycache__/

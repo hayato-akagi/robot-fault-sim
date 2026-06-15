@@ -71,3 +71,15 @@ services:
       - PYTHONUNBUFFERED=1
     command: ["python", "scripts/debug_episode.py", "mechanical"]
     profiles: ["debug"]
+
+  # ------------------------------------------------------------------
+  # ERROR/WARN 抽出: log_text から ERROR/WARN + 前後3 INFO を抽出
+  # ------------------------------------------------------------------
+  extract-errors:
+    build: .
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "scripts/extract_errors.py"]
+    profiles: ["extract"]
