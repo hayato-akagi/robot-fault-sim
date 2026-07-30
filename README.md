@@ -22,10 +22,45 @@ docker compose up --build
 
 | パス | 内容 |
 |------|------|
-| `output/dataset/logs/log_XXXX.txt` | 各エピソードのロボットログ |
-| `output/dataset/labels.csv` | ログ ID・故障種別の対応表（CSV） |
+| `output/dataset/trials/log_XXXX/` | 各試行のログ群（下記の2層構成） |
+| `output/dataset/labels.csv` | 試行 ID・故障種別の対応表（CSV） |
 | `output/viz/*.gif` | 可視化 GIF |
 | `output/viz/sensor_overview.png` | センサグラフ |
+
+### 試行ディレクトリの構成（2層ログ）
+
+1試行 = 1ディレクトリ。中央コントローラログ（要約・コンポーネント ID タグ付き）と、
+各コンポーネントの詳細ログの2層で構成される。
+
+```
+output/dataset/trials/log_0001/
+├── controller/
+│   ├── main.log        # 中央コントローラログ（全コンポーネント横断・アラームはラッチ）
+│   └── motion.csv      # 手先位置・IK残差・制御周期の時系列
+├── components/
+│   ├── servo/
+│   │   ├── trace.csv   # 関節トルク・速度の時系列（J1〜J7）
+│   │   └── alarms.log  # サーボ側アラーム詳細（全繰り返し）
+│   ├── gripper/
+│   │   └── events.log  # グリッパ開閉コマンド・把持力・イベント
+│   └── fieldbus/
+│       └── comm.log    # センサ通信リンクステータス
+└── metadata.json       # 試行メタ情報（正解ラベルは含まない）
+```
+
+中央ログ `main.log` の各行は `[SRV-J2]` `[GRP-01]` `[BUS-01]` `[CTRL]` のような
+**発生元コンポーネント ID タグ**を持つ。同一アラームは初回のみ記録（ラッチ）され、
+繰り返しの全件は各コンポーネントログ側に残る。解析時は中央ログで異常箇所・時刻を
+特定し、該当コンポーネントの詳細ログへ掘り下げる。
+
+コンポーネント ID:
+
+| タグ | コンポーネント |
+|------|--------------|
+| `CTRL` | 中央モーションコントローラ（シーケンス・IK・リアルタイムループ） |
+| `SRV-01` / `SRV-J1`〜`SRV-J7` | サーボアンプ（ユニット / 軸別） |
+| `GRP-01` | 2フィンガーグリッパ |
+| `BUS-01` | センサフィールドバス |
 
 ### システムブロック図（ログ出力・保存経路）
 
@@ -34,11 +69,11 @@ flowchart TD
   A[run_dataset.py] --> B[pipeline.py]
   B --> C[kuka_sim.py / controller.py]
   C --> D[sensor.py]
-  D --> E[log_generator.py]
+  D --> E[trial_logger.py]
   D --> F[label_writer.py]
   C --> G[gif_renderer.py / plot_renderer.py]
 
-  E --> H[output/dataset/logs/log_XXXX.txt]
+  E --> H[output/dataset/trials/log_XXXX/]
   F --> I[output/dataset/labels.csv]
   B --> J[output/dataset/docs/robot_arm_spec.txt]
   G --> K[output/viz/*.gif]
@@ -79,9 +114,9 @@ flowchart LR
   end
 
   subgraph Logging[ログ出力・保存]
-    LG[ログ生成]
+    LG[ログルータ trial_logger]
     LW[ラベル生成]
-    L1[output/dataset/logs/log_XXXX.txt]
+    L1[output/dataset/trials/log_XXXX/]
     L2[output/dataset/labels.csv]
   end
 
@@ -123,8 +158,9 @@ flowchart LR
 python scripts/build_dataset_json.py
 ```
 
-`output/dataset/labels.csv` + `output/dataset/logs/*.txt` を読み込み、
-`data/sample_dataset.json` を生成する。
+`output/dataset/labels.csv` + `output/dataset/trials/<log_id>/` を読み込み、
+`data/sample_dataset.json` を生成する。各試行のログ群は `=== path ===` 区切りで
+1テキストにバンドルされる（CSV 時系列は 20 行ごとに間引き）。
 
 **ラベル正規化ルール:**
 
@@ -198,7 +234,7 @@ robot-fault-sim/
 │   └── experiments/                 #   実験設定・分類結果
 ├── output/                          # シミュレーション中間出力
 │   └── dataset/
-│       ├── logs/log_XXXX.txt
+│       ├── trials/log_XXXX/         #   1試行 = 1ディレクトリ（2層ログ）
 │       ├── labels.csv
 │       └── docs/robot_arm_spec.txt
 ├── src/
@@ -207,7 +243,7 @@ robot-fault-sim/
 │   │   └── kuka_sim.py              # Kuka シミュレーター
 │   ├── monitoring/
 │   │   ├── sensor.py                # 閾値超過検出 → SensorEvent
-│   │   ├── log_generator.py         # テキストログ生成
+│   │   ├── trial_logger.py          # 2層ログ出力（中央 + コンポーネント別）
 │   │   └── label_writer.py          # 正解ラベル CSV 出力
 │   ├── visualization/
 │   │   ├── gif_renderer.py          # GIF 生成

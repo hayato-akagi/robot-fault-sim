@@ -13,7 +13,7 @@ from pathlib import Path
 
 from src.simulation.kuka_sim import KukaSim
 from src.monitoring.sensor import SensorMonitor
-from src.monitoring.log_generator import LogGenerator
+from src.monitoring.trial_logger import TrialLogger
 from src.monitoring.label_writer import LabelWriter
 from src.visualization.gif_renderer import GifRenderer
 
@@ -72,11 +72,11 @@ class SimulationPipeline:
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.monitor = SensorMonitor(cfg)
-        self.log_gen = LogGenerator()
+        self.trial_logger = TrialLogger()
         self.gif_renderer = GifRenderer(cfg)
 
         out = cfg["output"]
-        Path(out["logs_dir"]).mkdir(parents=True, exist_ok=True)
+        Path(out["trials_dir"]).mkdir(parents=True, exist_ok=True)
         Path(out["docs_dir"]).mkdir(parents=True, exist_ok=True)
         Path(out["viz_dir"]).mkdir(parents=True, exist_ok=True)
 
@@ -105,11 +105,10 @@ class SimulationPipeline:
         # センサ解析 → イベント抽出
         events = self.monitor.analyze(records, fault_type)
 
-        # テキストログ保存
-        log_text = self.log_gen.generate(
-            events, episode_result, effective_label, log_id)
-        log_path = Path(self.cfg["output"]["logs_dir"]) / f"{log_id}.txt"
-        log_path.write_text(log_text, encoding="utf-8")
+        # 試行ディレクトリへログ群を保存（2層構成）
+        trial_dir = Path(self.cfg["output"]["trials_dir"]) / log_id
+        self.trial_logger.write_trial(
+            trial_dir, records, events, episode_result, log_id)
 
         # ラベル保存
         fault_phases = sorted({

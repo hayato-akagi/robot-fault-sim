@@ -104,7 +104,7 @@ def main():
     elapsed = time.time() - t_start
     print(f"\n{'='*55}")
     print(f"  Done.  {total} episodes in {elapsed:.1f}s")
-    print(f"  Logs   : {cfg['output']['logs_dir']}")
+    print(f"  Trials : {cfg['output']['trials_dir']}")
     print(f"  Labels : {cfg['output']['labels_file']}")
     print(f"  Docs   : {cfg['output']['docs_dir']}")
     print(f"  Viz    : {cfg['output']['viz_dir']}")

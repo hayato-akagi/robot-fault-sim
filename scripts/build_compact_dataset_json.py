@@ -46,8 +46,10 @@ def extract_important_lines(
     for i, line in enumerate(lines):
         lower = line.lower()
 
-        # 1) エピソード境界は必ず保持
-        if "episode start" in lower or "episode end" in lower:
+        # 1) エピソード境界は必ず保持（旧形式 Episode / 新形式 Sequence の両対応）
+        if ("episode start" in lower or "episode end" in lower
+                or "sequence start" in lower or "sequence end" in lower
+                or lower.startswith("=== ")):
             selected_idx.add(i)
 
         # 2) WARN/ERROR/FAULT などキーワードを含む行

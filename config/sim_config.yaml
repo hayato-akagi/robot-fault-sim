@@ -50,6 +50,6 @@ visualization:
 output:
   dataset_dir: output/dataset
   viz_dir: output/viz
-  logs_dir: output/dataset/logs
+  trials_dir: output/dataset/trials
   labels_file: output/dataset/labels.csv
   docs_dir: output/dataset/docs

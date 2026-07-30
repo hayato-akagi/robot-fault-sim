@@ -41,7 +41,7 @@ services:
       - bash
       - -c
       - |
-        cp -v /app/output/dataset/logs/*.txt   /classifier-data/logs/
+        cp -rv /app/output/dataset/trials/.    /classifier-data/trials/
         cp -v /app/output/dataset/docs/*.txt   /classifier-data/docs/
         cp -v /app/output/dataset/labels.csv   /classifier-data/labels/
         echo "Export complete."

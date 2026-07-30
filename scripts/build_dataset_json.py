@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-labels.csv + logs/*.txt → data/sample_dataset.json 変換スクリプト
+labels.csv + trials/<log_id>/ → data/sample_dataset.json 変換スクリプト
+
+各試行ディレクトリのログ群（中央コントローラログ・コンポーネント別ログ）を
+`=== path ===` 区切りで1テキストにバンドルする。CSV 時系列はサイズ抑制のため
+CSV_SAMPLE_STEP 行ごとに間引く。
 
 ラベル正規化ルール:
   - mechanical_* → ["mechanical"]
@@ -16,8 +20,19 @@ from pathlib import Path
 # --- パス設定 -------------------------
 ROOT = Path(__file__).resolve().parent.parent
 LABELS_CSV = ROOT / "output" / "dataset" / "labels.csv"
-LOGS_DIR   = ROOT / "output" / "dataset" / "logs"
+TRIALS_DIR = ROOT / "output" / "dataset" / "trials"
 OUT_PATH   = ROOT / "data" / "sample_dataset.json"
+
+CSV_SAMPLE_STEP = 20  # CSV 時系列の間引き間隔（行）
+BUNDLE_ORDER = [
+    "metadata.json",
+    "controller/main.log",
+    "controller/motion.csv",
+    "components/servo/trace.csv",
+    "components/servo/alarms.log",
+    "components/gripper/events.log",
+    "components/fieldbus/comm.log",
+]
 # -------------------------------------
 
 LABEL_MAP = {
@@ -42,12 +57,30 @@ def normalize_label(raw_label: str) -> list[str]:
     return [raw_label]
 
 
+def _sample_csv(text: str) -> str:
+    """ヘッダは残し、データ行を CSV_SAMPLE_STEP 行ごとに間引く。"""
+    lines = text.strip().splitlines()
+    if len(lines) <= 1:
+        return text.strip()
+    return "\n".join([lines[0]] + lines[1::CSV_SAMPLE_STEP])
+
+
 def load_log_text(log_id: str) -> str:
-    """logs/ 以下の対応テキストを読み込む。"""
-    log_file = LOGS_DIR / f"{log_id}.txt"
-    if not log_file.exists():
-        raise FileNotFoundError(f"Log file not found: {log_file}")
-    return log_file.read_text(encoding="utf-8").strip()
+    """trials/<log_id>/ のログ群を1テキストにバンドルする。"""
+    trial_dir = TRIALS_DIR / log_id
+    if not trial_dir.is_dir():
+        raise FileNotFoundError(f"Trial dir not found: {trial_dir}")
+
+    parts = []
+    for rel in BUNDLE_ORDER:
+        f = trial_dir / rel
+        if not f.exists():
+            continue
+        text = f.read_text(encoding="utf-8").strip()
+        if rel.endswith(".csv"):
+            text = _sample_csv(text)
+        parts.append(f"=== {rel} ===\n{text}")
+    return "\n\n".join(parts)
 
 
 def build_dataset() -> list[dict]:

@@ -5,7 +5,7 @@
 # Usage: bash scripts/export_to_classifier.sh [path/to/experiment-classifier]
 #
 # 処理内容:
-#   1. labels.csv + logs/*.txt → data/sample_dataset.json (JSON 配列)
+#   1. labels.csv + trials/<log_id>/ → data/sample_dataset.json (JSON 配列)
 #   2. data/knowledge/*.md     → $DEST/data/knowledge/
 #   3. data/sample_dataset.json → $DEST/data/
 
