@@ -23,6 +23,7 @@
 import csv
 import datetime
 import json
+import zipfile
 from pathlib import Path
 
 from src.simulation.kuka_sim import StepRecord
@@ -80,6 +81,17 @@ class TrialLogger:
         self._write_gripper_events(trial_dir, records, events)
         self._write_fieldbus_comm(trial_dir, records, events)
         self._write_metadata(trial_dir, records, trial_id)
+        self._write_zip_archive(trial_dir, trial_id)
+
+    # ------------------------------------------------------------------
+    # trials/<trial_id>.zip（trial_dir と同じ階層に、中身一式をまとめる）
+    # ------------------------------------------------------------------
+    def _write_zip_archive(self, trial_dir: Path, trial_id: str) -> None:
+        zip_path = trial_dir.parent / f"{trial_id}.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(trial_dir.rglob("*")):
+                if path.is_file():
+                    zf.write(path, arcname=f"{trial_id}/{path.relative_to(trial_dir)}")
 
     # ------------------------------------------------------------------
     # 中央コントローラログ
@@ -208,7 +220,7 @@ class TrialLogger:
 
         prev_cmd = None
         for r in records:
-            cmd = "close" if r.gripper_val == 1 else "open"
+            cmd = "open" if r.gripper_val == 1 else "close"
             if cmd != prev_cmd:
                 timeline.append((r.t, 0, self._fmt(r.t * self.STEP_MS, "GRP-01", "INFO",
                     f"CMD-{cmd.upper()} t={r.t} phase={r.phase}")))

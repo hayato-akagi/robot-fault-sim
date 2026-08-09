@@ -8,6 +8,7 @@
   software   → loop_delay_ms=28, ik_target_noise=0.15
 """
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,17 @@ from src.monitoring.sensor import SensorMonitor
 from src.monitoring.trial_logger import TrialLogger
 from src.monitoring.label_writer import LabelWriter
 from src.visualization.gif_renderer import GifRenderer
+
+
+def _seed_for(log_id: str) -> int:
+    """log_id から決まる乱数シード。
+
+    以前は乱数（電気系のセンサ欠損、ソフトウェア系のIKノイズ）にシードが無く、
+    同じ log_id を再生成しても毎回別のログになっていた。log_id から一意に
+    決まる値にすることで、特定の試行だけを再生成したときに同じログ集合を
+    再現できるようにする。
+    """
+    return int(hashlib.sha256(log_id.encode()).hexdigest()[:8], 16)
 
 
 FAULT_PARAMS = {
@@ -76,7 +88,13 @@ class SimulationPipeline:
         self.gif_renderer = GifRenderer(cfg)
 
         out = cfg["output"]
-        Path(out["trials_dir"]).mkdir(parents=True, exist_ok=True)
+        # trials/ を一度空にしてから作り直す。件数やlog_idの割り当てを変えて
+        # 実行し直すと、前回分の試行ディレクトリ（今回のlabels.csvには存在しない
+        # log_id）が残ったままになり、trials/ と labels.csv が1:1対応しなくなる。
+        trials_dir = Path(out["trials_dir"])
+        if trials_dir.exists():
+            shutil.rmtree(trials_dir)
+        trials_dir.mkdir(parents=True, exist_ok=True)
         Path(out["docs_dir"]).mkdir(parents=True, exist_ok=True)
         Path(out["viz_dir"]).mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +106,7 @@ class SimulationPipeline:
         fault_params = fault_params_override or FAULT_PARAMS.get(fault_type, {})
         # バリアントのlabelをfault_typeのサブカテゴリとして使用
         effective_label = fault_params.get("label", fault_type)
-        sim = KukaSim(fault_params=fault_params)
+        sim = KukaSim(fault_params=fault_params, seed=_seed_for(log_id))
 
         try:
             sim.setup()

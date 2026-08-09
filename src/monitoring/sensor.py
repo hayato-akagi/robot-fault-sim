@@ -20,6 +20,24 @@ ENCODER_TOL_RAD    = 0.05
 GRIP_FORCE_WARN    = 60.0   # 正常=100N
 GRIP_FORCE_ERR     = 5.0    # 2Nをキャッチ
 
+# 関節トルク超過アラームの閾値（軸ごと）。
+#
+# J2・J4（肩・肘）はアーム自重を支えるだけで通常時から数十Nmの保持トルクを要する
+# （debug_episode で実測: J2 median≈53Nm p99≈110Nm、J4 median≈25Nm p99≈110Nm）。
+# 旧値の一律 8.8Nm/6.6Nm はこれを大きく下回っており、normal を含む全カテゴリで
+# ほぼ毎ステップ超過していた（ALM-JNT-OVR が故障の指標として機能していなかった
+# バグ）。ここは正常時の実測レンジ（p99 + 余裕）まで引き上げ、software 故障時の
+# 継続的な飽和（IKターゲットが暴れて全軸が定格上限に張り付く）とだけ区別できる
+# ようにする。
+JOINT_TORQUE_LIMITS_NM = [45.0, 130.0, 35.0, 180.0, 10.0, 25.0, 5.0]  # J1..J7
+
+# 固着兆候（低速なのに高トルク）の閾値も同じ理由で見直し。旧値 5.5Nm は上記と
+# 同じくアームの自重保持トルクを下回っており、HOLD 等の静止フェーズで
+# ほぼ常時成立していた（実測: normal でも 750 ステップ中 138 回、mechanical と
+# 同水準）。低速時の実測最大値（正常・mechanical とも約65〜70Nm）を上回る値まで
+# 引き上げる。
+AXIS_STICTION_TORQUE_NM = 110.0
+
 # 現場ログ風の診断コード定義（ラベル名を直接含めない）
 EVENT_DEFINITIONS = {
     # Mechanical-like
@@ -119,9 +137,9 @@ class SensorMonitor:
         evs = []
         force = r.grip_force_actual
 
-        # 関節トルク超過（J1-J4: 8.8Nm, J5-J7: 6.6Nm）
+        # 関節トルク超過（軸ごとの実測ベース閾値、JOINT_TORQUE_LIMITS_NM 参照）
         for i, tq in enumerate(r.joint_torques):
-            limit = 8.8 if i < 4 else 6.6
+            limit = JOINT_TORQUE_LIMITS_NM[i]
             if abs(tq) > limit:
                 evs.append(SensorEvent(
                     t=r.t, phase=r.phase, level="ERROR",
@@ -144,7 +162,7 @@ class SensorMonitor:
         # 固着兆候: 速度ほぼゼロ + トルク高負荷
         max_vel = max(abs(v) for v in r.joint_velocities) if r.joint_velocities else 0.0
         max_tq = max(abs(v) for v in r.joint_torques) if r.joint_torques else 0.0
-        if r.phase in ("GRASP", "LIFT", "MOVE", "HOLD") and max_vel < 0.02 and max_tq > 5.5:
+        if r.phase in ("GRASP", "LIFT", "MOVE", "HOLD") and max_vel < 0.02 and max_tq > AXIS_STICTION_TORQUE_NM:
             axis_idx = int(np.argmax(np.abs(r.joint_torques))) if r.joint_torques else 0
             evs.append(SensorEvent(
                 t=r.t, phase=r.phase, level="WARN",
@@ -163,7 +181,7 @@ class SensorMonitor:
                 },
             ))
 
-        if r.phase == "GRASP" and r.gripper_val == 1:
+        if r.phase == "GRASP" and r.gripper_val == 0:
             if force < GRIP_FORCE_ERR:
                 evs.append(SensorEvent(
                     t=r.t, phase=r.phase, level="ERROR",
@@ -193,8 +211,8 @@ class SensorMonitor:
                             "nominal": GRIP_FORCE_WARN},
                 ))
 
-        # LIFT/MOVE/HOLDでグリップ力が低い = 把持が外れている
-        if r.phase in ("LIFT", "MOVE", "HOLD") and r.gripper_val == 1:
+        # LIFT/MOVE/HOLDでグリップ力が低い = 把持が外れている（gripper_val=0: 閉指令中）
+        if r.phase in ("LIFT", "MOVE", "HOLD") and r.gripper_val == 0:
             if force < GRIP_FORCE_ERR:
                 evs.append(SensorEvent(
                     t=r.t, phase=r.phase, level="ERROR",

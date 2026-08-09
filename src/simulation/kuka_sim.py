@@ -15,7 +15,6 @@ Colabデモ（https://colab.research.google.com/drive/1eXq-Tl3QKzmbXGSKU2hDk0u_E
 """
 
 import math
-import time
 import numpy as np
 import pybullet as p
 import pybullet_data
@@ -113,7 +112,22 @@ class KukaSim:
     # 正常時のグリップ力
     GRIP_FORCE_NORMAL = 100
 
-    def __init__(self, fault_params: dict = None, capture_every: int = 8):
+    # kuka_iiwa/model_vr_limits.urdf が定義する各軸の定格トルク上限（getJointInfo で確認）。
+    # setJointMotorControl2 に force を渡さないと pybullet はデフォルトの
+    # maxForce=100000 を使い、position control が瞬間的な位置誤差を埋めようとして
+    # 数千〜1万Nm超のトルクを出す（起動直後の姿勢遷移で顕著）。これでは
+    # ALM-JNT-OVR がどの故障タイプでも常時飽和し、故障の指標として機能しない。
+    JOINT_MAX_FORCE_NM = 300.0
+
+    # 疑似的な制御ループのオーバーヘッド。実測（壁時計）は使わない——ホストの
+    # スケジューラ負荷やDocker実行環境差でステップごとに変動し、同じ log_id を
+    # 再実行しても再現しない値になる（loop_period_ms が実行環境のノイズを拾って
+    # しまうバグ）。IK計算・物理ステップにかかる実処理時間のオーダーを固定値で
+    # 代表させ、故障注入の delay_ms だけを上乗せする論理値にする。
+    NOMINAL_LOOP_MS = 0.2
+
+    def __init__(self, fault_params: dict = None, capture_every: int = 8,
+                 seed: int | None = None):
         self.fp = fault_params or {}
         self.capture_every = capture_every  # Colabは8ステップに1フレーム
         self.client = None
@@ -121,6 +135,10 @@ class KukaSim:
         self.gripper_id = None
         self.cube_id = None
         self._sensor_missing_remaining = 0
+        # 未指定なら再現性より多様性を優先し既定のグローバル状態のまま進める。
+        # 特定の log_id を再生成して同じログ集合を得たい場合は呼び出し側が
+        # log_id 由来の値などを渡す。
+        self._rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
 
     def setup(self):
         """Colabの初期化コードをそのまま移植。"""
@@ -232,14 +250,10 @@ class KukaSim:
         target_orn = p.getQuaternionFromEuler([0, 1.01 * math.pi, 0])
 
         for t in range(self.TOTAL_STEPS):
-            t0 = time.perf_counter()
-
             # ----------------------------------------------------------
             # Software fault: ループ遅延
             # ----------------------------------------------------------
             delay_ms = self.fp.get("loop_delay_ms", 0.0)
-            if delay_ms > 0:
-                time.sleep(delay_ms / 1000.0)
 
             # ----------------------------------------------------------
             # Colabと同じ target_pos / gripper_val の決定ロジック
@@ -266,8 +280,8 @@ class KukaSim:
             ik_noise = self.fp.get("ik_target_noise", 0.0)
             noisy_target = list(target_pos)
             if ik_noise > 0 and t >= 150:
-                noisy_target[0] += np.random.uniform(-ik_noise, ik_noise)
-                noisy_target[1] += np.random.uniform(-ik_noise, ik_noise)
+                noisy_target[0] += self._rng.uniform(-ik_noise, ik_noise)
+                noisy_target[1] += self._rng.uniform(-ik_noise, ik_noise)
 
             # IK計算
             joint_poses = p.calculateInverseKinematics(
@@ -283,6 +297,7 @@ class KukaSim:
                     jointIndex=j,
                     controlMode=p.POSITION_CONTROL,
                     targetPosition=joint_poses[j],
+                    force=self.JOINT_MAX_FORCE_NM,
                     physicsClientId=self.client,
                 )
 
@@ -290,7 +305,9 @@ class KukaSim:
             # Mechanical fault: グリップ力低下
             # ----------------------------------------------------------
             grip_force = self.fp.get("grip_force", self.GRIP_FORCE_NORMAL)
-            # gripper_val=0: 開(0.05), gripper_val=1: 閉(-0.01)
+            # gripper_val=1: 開(0.05), gripper_val=0: 閉(-0.01)
+            # （旧コメントは逆だった。cube 位置を実測して確認済み: gripper_val=0の
+            #   GRASP〜HOLD間、キューブはee_posと連動して動き、RELEASE直後に落下する。）
             gripper_pos = 0.05 - gripper_val * 0.06
 
             p.setJointMotorControl2(
@@ -311,7 +328,7 @@ class KukaSim:
             # ----------------------------------------------------------
             # センサ取得
             # ----------------------------------------------------------
-            loop_ms = (time.perf_counter() - t0) * 1000.0 + delay_ms
+            loop_ms = self.NOMINAL_LOOP_MS + delay_ms
 
             # Electrical fault: センサ欠損（通信断絶）
             sensor_missing = self._check_sensor_missing()
@@ -327,7 +344,7 @@ class KukaSim:
                 # Electrical fault: エンコーダノイズ
                 noise_std = self.fp.get("encoder_noise_std", 0.0)
                 if noise_std > 0:
-                    noise = np.random.normal(0, noise_std, num_joints)
+                    noise = self._rng.normal(0, noise_std, num_joints)
                     positions = [p_val + n for p_val, n in zip(positions, noise)]
                     encoder_noise_rms = float(np.sqrt(np.mean(noise**2)))
                 else:
@@ -388,7 +405,7 @@ class KukaSim:
         if self._sensor_missing_remaining > 0:
             self._sensor_missing_remaining -= 1
             return True
-        if prob > 0 and np.random.random() < prob:
+        if prob > 0 and self._rng.random() < prob:
             self._sensor_missing_remaining = self.fp.get("sensor_missing_steps", 30)
             return True
         return False
